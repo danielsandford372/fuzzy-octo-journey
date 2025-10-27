@@ -1,5 +1,6 @@
 """
-Database schema and management for MTA train location data.
+Database schema and management for Transit Tracker.
+Supports multiple transit agencies.
 """
 import sqlite3
 from datetime import datetime
@@ -7,10 +8,10 @@ from typing import List, Dict, Any
 import os
 
 
-class MTADatabase:
-    """Manages SQLite database for MTA train location data."""
+class TransitDatabase:
+    """Manages SQLite database for transit location data across multiple agencies."""
 
-    def __init__(self, db_path: str = "mta_trains.db"):
+    def __init__(self, db_path: str = "transit_tracker.db"):
         """Initialize database connection and create tables if needed."""
         self.db_path = db_path
         self.conn = None
@@ -23,13 +24,15 @@ class MTADatabase:
         self.conn.row_factory = sqlite3.Row
 
     def create_tables(self):
-        """Create database tables for storing train location data."""
+        """Create database tables for storing transit data."""
         cursor = self.conn.cursor()
 
-        # Table for train positions
+        # Table for vehicle positions
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS train_positions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                system TEXT NOT NULL,
+                agency TEXT NOT NULL,
                 trip_id TEXT NOT NULL,
                 route_id TEXT NOT NULL,
                 train_id TEXT,
@@ -42,6 +45,8 @@ class MTADatabase:
                 bearing REAL,
                 speed REAL,
                 recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX idx_system (system),
+                INDEX idx_agency (agency),
                 INDEX idx_trip_id (trip_id),
                 INDEX idx_route_id (route_id),
                 INDEX idx_timestamp (timestamp),
@@ -53,6 +58,8 @@ class MTADatabase:
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS trip_updates (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                system TEXT NOT NULL,
+                agency TEXT NOT NULL,
                 trip_id TEXT NOT NULL,
                 route_id TEXT NOT NULL,
                 stop_id TEXT NOT NULL,
@@ -61,6 +68,7 @@ class MTADatabase:
                 schedule_relationship TEXT,
                 timestamp INTEGER NOT NULL,
                 recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX idx_trip_update_system (system),
                 INDEX idx_trip_update_trip_id (trip_id),
                 INDEX idx_trip_update_stop_id (stop_id),
                 INDEX idx_trip_update_timestamp (timestamp)
@@ -71,7 +79,9 @@ class MTADatabase:
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS service_alerts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                alert_id TEXT UNIQUE NOT NULL,
+                system TEXT NOT NULL,
+                agency TEXT NOT NULL,
+                alert_id TEXT NOT NULL,
                 header_text TEXT,
                 description_text TEXT,
                 alert_type TEXT,
@@ -81,6 +91,8 @@ class MTADatabase:
                 affected_routes TEXT,
                 timestamp INTEGER NOT NULL,
                 recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(system, alert_id),
+                INDEX idx_alert_system (system),
                 INDEX idx_alert_id (alert_id),
                 INDEX idx_alert_timestamp (timestamp)
             )
@@ -90,10 +102,13 @@ class MTADatabase:
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS feed_metadata (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                system TEXT NOT NULL,
+                agency TEXT NOT NULL,
                 feed_name TEXT NOT NULL,
                 gtfs_realtime_version TEXT,
                 timestamp INTEGER NOT NULL,
                 recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX idx_feed_system (system),
                 INDEX idx_feed_timestamp (timestamp)
             )
         """)
@@ -101,15 +116,17 @@ class MTADatabase:
         self.conn.commit()
 
     def insert_train_position(self, position_data: Dict[str, Any]) -> int:
-        """Insert a train position record."""
+        """Insert a vehicle position record."""
         cursor = self.conn.cursor()
         cursor.execute("""
             INSERT INTO train_positions (
-                trip_id, route_id, train_id, direction,
+                system, agency, trip_id, route_id, train_id, direction,
                 current_stop_id, current_status, timestamp,
                 latitude, longitude, bearing, speed
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
+            position_data.get('system'),
+            position_data.get('agency'),
             position_data.get('trip_id'),
             position_data.get('route_id'),
             position_data.get('train_id'),
@@ -130,11 +147,13 @@ class MTADatabase:
         cursor = self.conn.cursor()
         cursor.execute("""
             INSERT INTO trip_updates (
-                trip_id, route_id, stop_id,
+                system, agency, trip_id, route_id, stop_id,
                 arrival_time, departure_time,
                 schedule_relationship, timestamp
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
+            update_data.get('system'),
+            update_data.get('agency'),
             update_data.get('trip_id'),
             update_data.get('route_id'),
             update_data.get('stop_id'),
@@ -151,12 +170,14 @@ class MTADatabase:
         cursor = self.conn.cursor()
         cursor.execute("""
             INSERT OR REPLACE INTO service_alerts (
-                alert_id, header_text, description_text,
+                system, agency, alert_id, header_text, description_text,
                 alert_type, severity,
                 active_period_start, active_period_end,
                 affected_routes, timestamp
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
+            alert_data.get('system'),
+            alert_data.get('agency'),
             alert_data.get('alert_id'),
             alert_data.get('header_text'),
             alert_data.get('description_text'),
@@ -170,20 +191,34 @@ class MTADatabase:
         self.conn.commit()
         return cursor.lastrowid
 
-    def insert_feed_metadata(self, feed_name: str, version: str, timestamp: int):
+    def insert_feed_metadata(self, system: str, agency: str, feed_name: str, version: str, timestamp: int):
         """Insert feed metadata."""
         cursor = self.conn.cursor()
         cursor.execute("""
-            INSERT INTO feed_metadata (feed_name, gtfs_realtime_version, timestamp)
-            VALUES (?, ?, ?)
-        """, (feed_name, version, timestamp))
+            INSERT INTO feed_metadata (system, agency, feed_name, gtfs_realtime_version, timestamp)
+            VALUES (?, ?, ?, ?, ?)
+        """, (system, agency, feed_name, version, timestamp))
         self.conn.commit()
 
-    def get_latest_positions(self, route_id: str = None, limit: int = 100) -> List[Dict]:
-        """Get the latest train positions, optionally filtered by route."""
+    def get_latest_positions(self, system: str = None, route_id: str = None, limit: int = 100) -> List[Dict]:
+        """Get the latest vehicle positions, optionally filtered by system and/or route."""
         cursor = self.conn.cursor()
 
-        if route_id:
+        if system and route_id:
+            cursor.execute("""
+                SELECT * FROM train_positions
+                WHERE system = ? AND route_id = ?
+                ORDER BY timestamp DESC
+                LIMIT ?
+            """, (system, route_id, limit))
+        elif system:
+            cursor.execute("""
+                SELECT * FROM train_positions
+                WHERE system = ?
+                ORDER BY timestamp DESC
+                LIMIT ?
+            """, (system, limit))
+        elif route_id:
             cursor.execute("""
                 SELECT * FROM train_positions
                 WHERE route_id = ?

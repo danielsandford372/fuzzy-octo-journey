@@ -1,6 +1,6 @@
-# Quick Start Guide
+# Transit Tracker - Quick Start Guide
 
-Get up and running with MTA Train Data Sync in 5 minutes!
+Track multiple transit systems in 5 minutes!
 
 ## 1. Install Dependencies
 
@@ -8,11 +8,16 @@ Get up and running with MTA Train Data Sync in 5 minutes!
 pip install -r requirements.txt
 ```
 
-## 2. Get an API Key
+## 2. Get API Keys
 
-1. Go to https://api.mta.info/
-2. Sign up (it's free!)
-3. Create an API key
+Choose which systems you want to track and get the required API keys:
+
+- **MTA (NYC)**: https://api.mta.info/ (required)
+- **BART (SF)**: https://api.bart.gov/docs/overview/index.aspx (required)
+- **MBTA (Boston)**: https://api-v3.mbta.com/ (required)
+- **WMATA (DC)**: https://developer.wmata.com/ (required)
+- **CTA (Chicago)**: No key needed!
+- **LA Metro**: No key needed!
 
 ## 3. Configure
 
@@ -20,52 +25,81 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Edit `.env` and add your key:
-```
-MTA_API_KEY=your_key_here
+Edit `.env` and add your API keys:
+```bash
+MTA_NYC_API_KEY=your_key_here
+BART_API_KEY=your_key_here
+# ... etc
 ```
 
-## 4. Start Syncing
+## 4. List Available Systems
 
 ```bash
-python sync.py
+python tracker.py --list-systems
 ```
 
-That's it! Data is now being collected into `mta_trains.db`
+## 5. Start Tracking!
 
-## 5. Query the Data
+Track all configured systems:
+```bash
+python tracker.py
+```
 
-Check database status:
+Track specific systems only:
+```bash
+python tracker.py --systems mta_nyc,bart
+```
+
+One-time sync:
+```bash
+python tracker.py --once
+```
+
+## 6. Query the Data
+
+Check database:
 ```bash
 python status.py
 ```
 
-Run example queries:
+Query directly:
 ```bash
-python query_examples.py
-```
-
-Use SQL directly:
-```bash
-sqlite3 mta_trains.db
-sqlite> SELECT route_id, COUNT(*) FROM train_positions GROUP BY route_id;
+sqlite3 transit_tracker.db
+sqlite> SELECT system, COUNT(*) FROM train_positions GROUP BY system;
 ```
 
 ## Common Commands
 
-**Single sync (no continuous loop):**
+**List systems:**
 ```bash
-python sync.py --once
+python tracker.py --list-systems
 ```
 
-**Sync only specific lines:**
+**Track NYC only:**
 ```bash
-python sync.py --once --feed ACE
+python tracker.py --systems mta_nyc
+```
+
+**Track Chicago and LA (no API key needed!):**
+```bash
+python tracker.py --systems cta,la_metro
 ```
 
 **Change update interval:**
 ```bash
-python sync.py --interval 60
+python tracker.py --interval 60
 ```
 
-See `README.md` for full documentation!
+**Clean up old data:**
+```bash
+python tracker.py --cleanup
+```
+
+## Next Steps
+
+- Check `README.md` for complete documentation
+- See `releases/` for single-system trackers
+- Review database schema for query ideas
+- Set up continuous sync as a service
+
+That's it! You're now tracking transit data!
